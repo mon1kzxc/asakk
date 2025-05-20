@@ -24,5 +24,6 @@
 
 1. Клонируйте репозиторий:
    ```bash
-   git clone https://github.com/ ваш-логин/asakk.git
+   git clone https://github.com/mon1kzxc/asakk.git
    cd asakk
+2. pip install -r requirements.txt
