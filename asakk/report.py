@@ -2,7 +2,9 @@ import psycopg2
 import matplotlib.pyplot as plt
 from data.config import DB_CONFIG
 import logging
-
+from collections import defaultdict
+import numpy as np
+from sklearn.linear_model import LinearRegression
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
@@ -28,13 +30,14 @@ def analyze_all_results():
 
     if results:
         categories, scores = zip(*results)
+        fig, ax = plt.subplots()
         plt.bar(categories, scores)
         plt.title("Средние оценки по категориям")
         plt.xlabel("Категории")
         plt.ylabel("Средний балл")
         plt.xticks(rotation=45)
         plt.tight_layout()
-        plt.show()
+        return fig
     else:
         from tkinter import messagebox
         messagebox.showinfo("Нет данных", "Еще нет результатов для анализа")
@@ -56,24 +59,22 @@ def analyze_category(category):
     if not results:
         from tkinter import messagebox
         messagebox.showinfo("Нет данных", f"Нет результатов для категории '{category}'")
-        return
+        return None  # Возвращаем None, чтобы GUI мог обработать отсутствие данных
 
     questions, scores = zip(*results)
 
     max_length = 20
     short_questions = [q[:max_length] + '...' if len(q) > max_length else q for q in questions]
 
-    plt.figure(figsize=(10, 6))
-    bars = plt.bar(short_questions, scores)
-    plt.title(f"Оценки по категории: {category}")
-    plt.xlabel("Вопросы")
-    plt.ylabel("Оценка")
-
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(short_questions, scores)
+    ax.set_title(f"Оценки по категории: {category}")
+    ax.set_xlabel("Вопросы")
+    ax.set_ylabel("Оценка")
     plt.xticks(rotation=45, fontsize=8, ha='right')
-
     plt.tight_layout()
 
-    plt.show()
+    return fig  
 
 
 def score_distribution_by_category(category):
@@ -96,14 +97,14 @@ def score_distribution_by_category(category):
         return
 
     scores, counts = zip(*results)
-
+    fig, ax = plt.subplots()
     plt.bar(scores, counts, color='skyblue')
     plt.title(f"Распределение оценок — {category}")
     plt.xlabel("Оценка (0–4)")
     plt.ylabel("Число ответов")
     plt.xticks(range(5))
     plt.tight_layout()
-    plt.show()
+    return fig
 
 
 
@@ -150,7 +151,7 @@ def pie_chart_by_category(category):
     ax.axis('equal')  
     plt.title(f"Распределение оценок — {category}", fontsize=14)
     plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def generate_recommendations():
@@ -358,3 +359,69 @@ def delete_recommendation_by_category(category):
     cursor.execute("DELETE FROM recommendations WHERE category = %s", (category,))
     conn.commit()
     conn.close()
+
+
+def get_last_10_scores_per_category():
+    """
+    Забирает последние 10 оценок по каждой категории из базы данных.
+    """
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    query = """
+        SELECT q.category, a.score, a.timestamp
+        FROM answers a
+        JOIN questions q ON a.question_id = q.id
+        ORDER BY q.category, a.timestamp DESC
+    """
+
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Группируем и оставляем только последние 10 оценок на категорию
+    scores_by_category = defaultdict(list)
+
+    for category, score, timestamp in rows:
+        scores_by_category[category].append(score)
+
+    # Оставляем только последние 10 записей для каждой категории
+    for cat in scores_by_category:
+        scores_by_category[cat] = scores_by_category[cat][-10:]
+
+    return scores_by_category
+
+def predict_culture():
+    """
+    Прогнозирует изменение показателей культуры на основе последних 10 оценок.
+    Возвращает словарь с прогнозом на следующий шаг (например, следующая оценка).
+    """
+    data = get_last_10_scores_per_category()
+    predictions = {}
+
+    for category, scores in data.items():
+        if len(scores) < 2:
+            continue  # Нужно минимум 2 точки для прогноза
+
+        X = np.array(range(len(scores))).reshape(-1, 1)
+        y = np.array(scores).reshape(-1, 1)
+
+        model = LinearRegression()
+        model.fit(X, y)
+
+        next_point = np.array([[len(scores)]])  # Предсказываем следующую точку
+        prediction = model.predict(next_point)[0][0]
+
+        predicted_score = round(prediction, 1)
+        last_score = round(scores[-1], 1)
+
+        trend = "улучшение" if predicted_score > last_score else \
+                "ухудшение" if predicted_score < last_score else "без изменений"
+
+        predictions[category] = (
+            f"Последняя оценка: {last_score}\n"
+            f"Прогноз на следующий этап: {predicted_score}\n"
+            f"Тренд: {trend}"
+        )
+
+    return predictions

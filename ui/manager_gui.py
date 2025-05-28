@@ -1,14 +1,17 @@
-# ui/manager_gui.py
-
 import tkinter as tk
 from tkinter import ttk, messagebox
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+
+# Импорты из report.py
 from asakk.report import (
     analyze_all_results,
     analyze_category,
     score_distribution_by_category,
     pie_chart_by_category,
     generate_recommendations,
-    export_to_csv
+    export_to_csv,
+    predict_culture
 )
 
 
@@ -66,40 +69,152 @@ class ManagerApp:
         button_frame = tk.Frame(self.root, bg="#f8f9fa")
         button_frame.pack(pady=10)
 
-        tk.Button(button_frame, text="📊 Общий отчет", width=25, command=analyze_all_results, bg="#007bff", fg="white").pack(pady=5)
-        tk.Button(button_frame, text="📈 Отчет по категории", width=25, command=self.show_category_report, bg="#28a745", fg="white").pack(pady=5)
-        tk.Button(button_frame, text="📊 Распределение оценок", width=25, command=self.show_score_distribution, bg="#ffc107", fg="black").pack(pady=5)
-        tk.Button(button_frame, text="🥧 Диаграмма оценок", width=25, command=self.show_pie_chart, bg="#17a2b8", fg="white").pack(pady=5)
-        tk.Button(button_frame, text="📋 Рекомендации", width=25, command=self.show_recommendations, bg="#dc3545", fg="white").pack(pady=5)
-        tk.Button(button_frame, text="📤 Экспорт CSV", width=25, command=self.export_data, bg="#6c757d", fg="white").pack(pady=5)
-        tk.Button(button_frame, text="🚪 Выйти", width=25, command=self.root.quit, bg="#343a40", fg="white").pack(pady=5)
+        tk.Button(button_frame, text="📊 Общий отчет", width=25,
+                  command=lambda: self.show_matplotlib_window(analyze_all_results),
+                  bg="#007bff", fg="white").pack(pady=5)
 
-    def show_category_report(self):
-        category = self.category_var.get()
-        try:
-            analyze_category(category)
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось создать отчет: {e}")
+        tk.Button(button_frame, text="📈 Отчет по категории", width=25,
+                  command=self.show_category_report,
+                  bg="#28a745", fg="white").pack(pady=5)
 
-    def show_score_distribution(self):
-        category = self.category_var.get()
+        tk.Button(button_frame, text="📊 Распределение оценок", width=25,
+                  command=self.show_score_distribution,
+                  bg="#ffc107", fg="black").pack(pady=5)
+
+        tk.Button(button_frame, text="🥧 Диаграмма оценок", width=25,
+                  command=self.show_pie_chart,
+                  bg="#17a2b8", fg="white").pack(pady=5)
+
+        tk.Button(button_frame, text="📋 Рекомендации", width=25,
+                  command=self.show_recommendations,
+                  bg="#dc3545", fg="white").pack(pady=5)
+
+        tk.Button(button_frame, text="🔮 Прогнозирование", width=25,
+                  command=self.show_prediction,
+                  bg="#6f42c1", fg="white").pack(pady=5)
+
+        tk.Button(button_frame, text="📤 Экспорт CSV", width=25,
+                  command=self.export_data,
+                  bg="#6c757d", fg="white").pack(pady=5)
+
+        tk.Button(button_frame, text="🚪 Выйти", width=25,
+                  command=self.root.quit,
+                  bg="#343a40", fg="white").pack(pady=5)
+
+    def disable_main_window(self):
+        """Блокирует главное окно"""
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Toplevel):
+                continue
+            try:
+                widget.configure(state='disabled')
+            except tk.TclError:
+                pass
+
+    def enable_main_window(self):
+        """Разблокирует главное окно"""
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Toplevel):
+                continue
+            try:
+                widget.configure(state='normal')
+            except tk.TclError:
+                pass
+
+    def show_matplotlib_window(self, plot_func):
+        """Показывает график внутри Tkinter-окна"""
+        self.disable_main_window()
+
+        fig = None
         try:
-            score_distribution_by_category(category)
+            fig = plot_func()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось создать график: {e}")
+            self.enable_main_window()
+            return
 
-    def show_pie_chart(self):
+        if fig is None:
+            self.enable_main_window()
+            return
+
+        graph_window = tk.Toplevel(self.root)
+        graph_window.title("График")
+        graph_window.geometry("800x600")
+        graph_window.configure(bg="#ffffff")
+
+        canvas = FigureCanvasTkAgg(fig, master=graph_window)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        graph_window.protocol("WM_DELETE_WINDOW", lambda: [graph_window.destroy(), self.enable_main_window()])
+
+    def show_category_report(self):
+        self.disable_main_window()
         category = self.category_var.get()
         try:
-            pie_chart_by_category(category)
+            fig = analyze_category(category)
+            if fig:
+                graph_window = tk.Toplevel(self.root)
+                graph_window.title(f"Отчет по категории: {category}")
+                graph_window.geometry("800x600")
+                graph_window.configure(bg="#ffffff")
+
+                canvas = FigureCanvasTkAgg(fig, master=graph_window)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+                graph_window.protocol("WM_DELETE_WINDOW", lambda: [graph_window.destroy(), self.enable_main_window()])
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось создать отчет: {e}")
+            self.enable_main_window()
+
+    def show_score_distribution(self):
+        self.disable_main_window()
+        category = self.category_var.get()
+        try:
+            fig = score_distribution_by_category(category)
+            if fig:
+                graph_window = tk.Toplevel(self.root)
+                graph_window.title(f"Распределение оценок — {category}")
+                graph_window.geometry("800x600")
+                graph_window.configure(bg="#ffffff")
+
+                canvas = FigureCanvasTkAgg(fig, master=graph_window)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+                graph_window.protocol("WM_DELETE_WINDOW", lambda: [graph_window.destroy(), self.enable_main_window()])
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось создать график: {e}")
+            self.enable_main_window()
+
+    def show_pie_chart(self):
+        self.disable_main_window()
+        category = self.category_var.get()
+        try:
+            fig = pie_chart_by_category(category)
+            if fig:
+                graph_window = tk.Toplevel(self.root)
+                graph_window.title(f"Диаграмма оценок — {category}")
+                graph_window.geometry("800x600")
+                graph_window.configure(bg="#ffffff")
+
+                canvas = FigureCanvasTkAgg(fig, master=graph_window)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+                graph_window.protocol("WM_DELETE_WINDOW", lambda: [graph_window.destroy(), self.enable_main_window()])
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось создать диаграмму: {e}")
+            self.enable_main_window()
 
     def show_recommendations(self):
+        self.disable_main_window()
         try:
             recommendations = generate_recommendations()
             if not recommendations:
                 messagebox.showinfo("Нет данных", "Нет слабых мест для рекомендаций.")
+                self.enable_main_window()
                 return
 
             rec_window = tk.Toplevel(self.root)
@@ -120,10 +235,12 @@ class ManagerApp:
 
             rec_text.config(state=tk.DISABLED)
 
-            tk.Button(rec_window, text="Закрыть", command=rec_window.destroy, width=20, bg="#343a40", fg="white").pack(pady=10)
+            tk.Button(rec_window, text="Закрыть", command=lambda: [rec_window.destroy(), self.enable_main_window()],
+                      width=20, bg="#343a40", fg="white").pack(pady=10)
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось загрузить рекомендации: {e}")
+            self.enable_main_window()
 
     def export_data(self):
         try:
@@ -131,3 +248,42 @@ class ManagerApp:
             messagebox.showinfo("Готово", "Данные успешно экспортированы в results.csv")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось экспортировать данные: {e}")
+
+    def show_prediction(self):
+        self.disable_main_window()
+        try:
+            prediction = predict_culture()
+            if not prediction:
+                messagebox.showinfo("Нет данных", "Нет исторических данных для прогнозирования.")
+                self.enable_main_window()
+                return
+
+            pred_window = tk.Toplevel(self.root)
+            pred_window.title("Прогнозирование культуры")
+            pred_window.geometry("600x400")
+            pred_window.configure(bg="#ffffff")
+
+            tk.Label(pred_window, text="Результаты прогнозирования корпоративной культуры",
+                     font=("Arial", 14, "bold"), bg="#ffffff").pack(pady=10)
+
+            pred_text = tk.Text(pred_window, wrap=tk.WORD, height=15, width=70,
+                                bg="#f9f9f9", bd=2, relief="sunken")
+            pred_text.pack(padx=10, pady=10)
+
+            for cat, result in prediction.items():
+                pred_text.insert(tk.END, f"{cat}:\n{result}\n\n")
+            pred_text.config(state=tk.DISABLED)
+
+            tk.Button(pred_window, text="Закрыть",
+                      command=lambda: [pred_window.destroy(), self.enable_main_window()],
+                      width=20, bg="#343a40", fg="white").pack(pady=10)
+
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось выполнить прогноз: {e}")
+            self.enable_main_window()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ManagerApp(root, user={"id": 1, "username": "admin"})
+    root.mainloop()
