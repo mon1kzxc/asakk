@@ -2,12 +2,12 @@ import psycopg2
 import matplotlib.pyplot as plt
 from data.config import DB_CONFIG
 import logging
-from collections import defaultdict
 import numpy as np
+from collections import defaultdict
 from sklearn.linear_model import LinearRegression
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
 file_handler = logging.FileHandler('asakk.log', encoding='utf-8')
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 file_handler.setFormatter(formatter)
@@ -15,36 +15,133 @@ logger.addHandler(file_handler)
 logger.addHandler(logging.StreamHandler())
 logger.propagate = False
 
-def analyze_all_results():
-    """Общий отчет по всем категориям"""
+
+# --- СТАТИСТИЧЕСКИЙ АНАЛИЗ ---
+def analyze_survey_data():
+    """
+    Анализ опроса: расчёт средних значений, дисперсий и выявление аномалий.
+    Возвращает словарь:
+        {
+            'category': {
+                'mean': среднее,
+                'std': стандартное отклонение,
+                'var': дисперсия,
+                'anomalies': [список вопросов с аномальными оценками]
+            },
+            ...
+        }
+    """
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT q.category, AVG(a.score) AS avg_score
+        SELECT q.category, q.text, a.score
         FROM answers a
         JOIN questions q ON a.question_id = q.id
-        GROUP BY q.category
     ''')
     results = cursor.fetchall()
     conn.close()
 
-    if results:
-        categories, scores = zip(*results)
-        fig, ax = plt.subplots()
-        plt.bar(categories, scores)
-        plt.title("Средние оценки по категориям")
-        plt.xlabel("Категории")
-        plt.ylabel("Средний балл")
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        return fig
-    else:
+    category_scores = defaultdict(list)
+    question_scores = defaultdict(list)
+
+    for category, question, score in results:
+        category_scores[category].append(score)
+        question_scores[(category, question)].append(score)
+
+    analysis = {}
+
+    for category, scores in category_scores.items():
+        mean = np.mean(scores)
+        std = np.std(scores)
+        var = np.var(scores)
+
+        anomalies = []
+
+        for (cat, question), q_scores in question_scores.items():
+            if cat == category:
+                q_mean = np.mean(q_scores)
+                if abs(q_mean - mean) > 2 * std:
+                    anomalies.append({
+                        'question': question,
+                        'avg_score': round(q_mean, 2),
+                        'deviation': round(abs(q_mean - mean), 2)
+                    })
+
+        analysis[category] = {
+            'mean': round(mean, 2),
+            'std': round(std, 2),
+            'var': round(var, 2),
+            'anomalies': anomalies
+        }
+
+    return analysis
+
+
+# --- ОТЧЁТЫ СО СТАТИСТИКОЙ ---
+
+def analyze_all_results():
+    """Общий отчет по всем категориям с отклонениями"""
+    survey_data = analyze_survey_data()
+    if not survey_data:
         from tkinter import messagebox
-        messagebox.showinfo("Нет данных", "Еще нет результатов для анализа")
+        messagebox.showinfo("Нет данных", "Нет результатов для анализа")
+        return None
+
+    categories = list(survey_data.keys())
+    means = [survey_data[c]['mean'] for c in categories]
+    stds = [survey_data[c]['std'] for c in categories]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.bar(categories, means, yerr=stds, capsize=5, color='skyblue', edgecolor='black')
+    ax.set_title("Средние оценки по категориям с отклонением")
+    ax.set_xlabel("Категории")
+    ax.set_ylabel("Средний балл")
+    ax.tick_params(axis='x', rotation=45)
+    plt.tight_layout()
+
+    return fig
 
 
-def analyze_category(category):
-    """Отчет по одной категории с укороченными подписями"""
+def calculate_category_trend(category):
+    """
+    Возвращает данные для построения тренда методом наименьших квадратов.
+    """
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT a.score, a.timestamp
+        FROM answers a
+        JOIN questions q ON a.question_id = q.id
+        WHERE q.category = %s
+        ORDER BY a.timestamp
+    ''', (category,))
+    results = cursor.fetchall()
+    conn.close()
+
+    if len(results) < 2:
+        return None
+
+    scores = [r[0] for r in results]
+    X = np.arange(len(scores)).reshape(-1, 1)
+    y = np.array(scores).reshape(-1, 1)
+
+    model = LinearRegression()
+    model.fit(X, y)
+
+    trend_line = model.predict(X).flatten().tolist()
+
+    return {
+        "scores": scores,
+        "trend": trend_line,
+        "slope": model.coef_[0],
+        "intercept": model.intercept_
+    }
+
+
+# --- ГРАФИЧЕСКИЕ ФУНКЦИИ ДЛЯ GUI ---
+
+def analyze_category_data(category):
+    """Возвращает данные по категории без построения графика"""
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
     cursor.execute('''
@@ -57,24 +154,16 @@ def analyze_category(category):
     conn.close()
 
     if not results:
-        from tkinter import messagebox
-        messagebox.showinfo("Нет данных", f"Нет результатов для категории '{category}'")
-        return None  # Возвращаем None, чтобы GUI мог обработать отсутствие данных
+        return None
 
     questions, scores = zip(*results)
-
     max_length = 20
     short_questions = [q[:max_length] + '...' if len(q) > max_length else q for q in questions]
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.bar(short_questions, scores)
-    ax.set_title(f"Оценки по категории: {category}")
-    ax.set_xlabel("Вопросы")
-    ax.set_ylabel("Оценка")
-    plt.xticks(rotation=45, fontsize=8, ha='right')
-    plt.tight_layout()
-
-    return fig  
+    return {
+        "questions": short_questions,
+        "scores": scores
+    }
 
 
 def score_distribution_by_category(category):
@@ -94,18 +183,19 @@ def score_distribution_by_category(category):
     if not results:
         from tkinter import messagebox
         messagebox.showinfo("Нет данных", f"Нет результатов для категории '{category}'")
-        return
+        return None
 
     scores, counts = zip(*results)
-    fig, ax = plt.subplots()
-    plt.bar(scores, counts, color='skyblue')
-    plt.title(f"Распределение оценок — {category}")
-    plt.xlabel("Оценка (0–4)")
-    plt.ylabel("Число ответов")
-    plt.xticks(range(5))
-    plt.tight_layout()
-    return fig
 
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.bar(scores, counts, color='skyblue')
+    ax.set_title(f"Распределение оценок — {category}")
+    ax.set_xlabel("Оценка (0–4)")
+    ax.set_ylabel("Число ответов")
+    ax.set_xticks(range(5))
+    plt.tight_layout()
+
+    return fig
 
 
 def pie_chart_by_category(category):
@@ -125,19 +215,18 @@ def pie_chart_by_category(category):
     if not results:
         from tkinter import messagebox
         messagebox.showinfo("Нет данных", f"Нет результатов для категории '{category}'")
-        return
+        return None
 
     score_counts = dict(results)
     labels = []
     sizes = []
-
     for i in range(5):
         labels.append(f"{i} баллов")
         sizes.append(score_counts.get(i, 0))
 
     filtered_labels = [labels[i] if sizes[i] > 0 else '' for i in range(len(labels))]
     explode = [0.05 if size > 0 else 0 for size in sizes]
-    
+
     fig, ax = plt.subplots()
     ax.pie(
         sizes,
@@ -149,75 +238,18 @@ def pie_chart_by_category(category):
         textprops={'fontsize': 10}
     )
     ax.axis('equal')  
-    plt.title(f"Распределение оценок — {category}", fontsize=14)
+    ax.set_title(f"Распределение оценок — {category}", fontsize=14)
     plt.tight_layout()
+
     return fig
 
+
+# --- РЕКОМЕНДАЦИИ И ПРОГНОЗИРОВАНИЕ ---
 
 def generate_recommendations():
     """Формирует рекомендации на основе слабых категорий"""
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
-    cursor.execute('''
-        SELECT q.category, AVG(a.score) AS avg_score
-        FROM answers a
-        JOIN questions q ON a.question_id = q.id
-        GROUP BY q.category
-    ''')
-    results = cursor.fetchall()
-    conn.close()
-
-    low_categories = [cat for cat, score in results if score < 2]
-    if not low_categories:
-        return {}
-
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT category, event FROM recommendations
-        WHERE category = ANY(%s)
-    ''', (low_categories,))
-    events = cursor.fetchall()
-    conn.close()
-
-    recommendations = {}
-    for cat in low_categories:
-        recommendations[cat] = []
-
-    for cat, event in events:
-        if cat in recommendations:
-            recommendations[cat].append(event)
-
-    return recommendations
-
-
-def export_to_csv(filename="results.csv"):
-    """Экспорт всех данных в CSV-файл"""
-    import csv
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT u.username, q.text, q.category, a.score
-        FROM answers a
-        JOIN users u ON a.user_id = u.id
-        JOIN questions q ON a.question_id = q.id
-    ''')
-    data = cursor.fetchall()
-    conn.close()
-
-    with open(filename, mode='w', encoding='utf-8', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(["Пользователь", "Вопрос", "Категория", "Оценка"])
-        writer.writerows(data)
-
-
-def generate_recommendations():
-    """
-    Формирует рекомендации на основе слабых категорий (оценка < 2)
-    """
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-
     # Средние оценки по категориям
     cursor.execute('''
         SELECT q.category, AVG(a.score) AS avg_score
@@ -234,8 +266,6 @@ def generate_recommendations():
 
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
-
-    # Загружаем мероприятия по слабым категориям
     cursor.execute('''
         SELECT category, event FROM recommendations
         WHERE category = ANY(%s)
@@ -247,149 +277,12 @@ def generate_recommendations():
     recommendations = {}
     for cat in low_categories:
         recommendations[cat] = []
-
     for cat, event in events:
         if cat in recommendations:
             recommendations[cat].append(event)
 
     return recommendations
 
-
-def save_answers(user_id, answers):
-    """
-    Сохраняет ответы пользователя в БД
-    :param user_id: ID пользователя
-    :param answers: словарь {question_id: score}
-    """
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-    
-    for question_id, score in answers.items():
-        cursor.execute(
-            "INSERT INTO answers (user_id, question_id, score) VALUES (%s, %s, %s)",
-            (user_id, question_id, score)
-        )
-    
-    conn.commit()
-    conn.close()
-
-def next_question(self):
-    selected = self.var.get()
-    if selected == -1:
-        messagebox.showwarning("Ошибка", "Выберите оценку.")
-        return
-
-    q_id = self.questions[self.current_index][0]
-    self.answers[q_id] = selected
-    self.current_index += 1
-
-    if self.current_index < len(self.questions):
-        self.question_label.config(text=self.get_current_question_text())
-        self.var.set(-1)
-    else:
-        from asakk.report import save_answers
-        save_answers(self.user[0], self.answers)
-        messagebox.showinfo("Готово", "Ответы сохранены!")
-        self.root.quit()
-
-def add_recommendation_to_db(category, event):
-    logger.debug(f"Добавление мероприятия: {event} → {category}")
-    conn = None
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO recommendations (category, event) VALUES (%s, %s)",
-            (category, event)
-        )
-        conn.commit()
-        logger.info(f"Мероприятие '{event}' добавлено в '{category}'")
-    except Exception as e:
-        logger.error(f"Не удалось добавить мероприятие: {e}", exc_info=True)
-        if conn:
-            conn.rollback()
-    finally:
-        if conn:
-            conn.close()
-
-def get_categ_to_adm():
-    return [
-        "Ценности",
-        "Коммуникации",
-        "Лидерство",
-        "Инновации",
-        "Работа в команде",
-        "Работа и личная жизнь"
-    ]
-
-
-def add_question_with_recommendation(category, question_text, event_text):
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-
-    # Добавляем вопрос
-    cursor.execute(
-        "INSERT INTO questions (text, category) VALUES (%s, %s) RETURNING id",
-        (question_text, category)
-    )
-    question_id = cursor.fetchone()[0]
-
-    # Добавляем связанную рекомендацию
-    cursor.execute(
-        "INSERT INTO recommendations (category, event) VALUES (%s, %s)",
-        (category, event_text)
-    )
-
-    conn.commit()
-    conn.close()
-
-
-def delete_question_by_id(question_id):
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM answers WHERE question_id = %s", (question_id,))
-    cursor.execute("DELETE FROM questions WHERE id = %s", (question_id,))
-    conn.commit()
-    conn.close()
-
-
-def delete_recommendation_by_category(category):
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM recommendations WHERE category = %s", (category,))
-    conn.commit()
-    conn.close()
-
-
-def get_last_10_scores_per_category():
-    """
-    Забирает последние 10 оценок по каждой категории из базы данных.
-    """
-    conn = psycopg2.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-
-    query = """
-        SELECT q.category, a.score, a.timestamp
-        FROM answers a
-        JOIN questions q ON a.question_id = q.id
-        ORDER BY q.category, a.timestamp DESC
-    """
-
-    cursor.execute(query)
-    rows = cursor.fetchall()
-    conn.close()
-
-    # Группируем и оставляем только последние 10 оценок на категорию
-    scores_by_category = defaultdict(list)
-
-    for category, score, timestamp in rows:
-        scores_by_category[category].append(score)
-
-    # Оставляем только последние 10 записей для каждой категории
-    for cat in scores_by_category:
-        scores_by_category[cat] = scores_by_category[cat][-10:]
-
-    return scores_by_category
 
 def predict_culture():
     """
@@ -425,3 +318,146 @@ def predict_culture():
         )
 
     return predictions
+
+
+def get_last_10_scores_per_category():
+    """
+    Забирает последние 10 оценок по каждой категории из базы данных.
+    """
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    query = """
+        SELECT q.category, a.score, a.timestamp
+        FROM answers a
+        JOIN questions q ON a.question_id = q.id
+        ORDER BY q.category, a.timestamp DESC
+    """
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    conn.close()
+
+    scores_by_category = defaultdict(list)
+    for category, score, timestamp in rows:
+        scores_by_category[category].append(score)
+
+    # Оставляем только последние 10 записей для каждой категории
+    for cat in scores_by_category:
+        scores_by_category[cat] = scores_by_category[cat][:10]
+
+    return scores_by_category
+
+
+# --- ЭКСПОРТ И УПРАВЛЕНИЕ ДАННЫМИ ---
+
+def export_to_csv(filename="results.csv"):
+    """Экспорт всех данных в CSV-файл"""
+    import csv
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT u.username, q.text, q.category, a.score
+        FROM answers a
+        JOIN users u ON a.user_id = u.id
+        JOIN questions q ON a.question_id = q.id
+    ''')
+    data = cursor.fetchall()
+    conn.close()
+
+    with open(filename, mode='w', encoding='utf-8', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["Пользователь", "Вопрос", "Категория", "Оценка"])
+        writer.writerows(data)
+
+
+def save_answers(user_id, answers):
+    """
+    Сохраняет ответы пользователя в БД
+    :param user_id: ID пользователя
+    :param answers: словарь {question_id: score}
+    """
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    for question_id, score in answers.items():
+        cursor.execute(
+            "INSERT INTO answers (user_id, question_id, score) VALUES (%s, %s, %s)",
+            (user_id, question_id, score)
+        )
+    conn.commit()
+    conn.close()
+
+
+def add_recommendation_to_db(category, event):
+    logger.debug(f"Добавление мероприятия: {event} → {category}")
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO recommendations (category, event) VALUES (%s, %s)",
+            (category, event)
+        )
+        conn.commit()
+        logger.info(f"Мероприятие '{event}' добавлено в '{category}'")
+    except Exception as e:
+        logger.error(f"Не удалось добавить мероприятие: {e}", exc_info=True)
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_categ_to_adm():
+    return [
+        "Ценности",
+        "Коммуникации",
+        "Лидерство",
+        "Инновации",
+        "Работа в команде",
+        "Работа и личная жизнь"
+    ]
+
+
+def add_question_with_recommendation(category, question_text, event_text):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO questions (text, category) VALUES (%s, %s) RETURNING id",
+        (question_text, category)
+    )
+    question_id = cursor.fetchone()[0]
+    cursor.execute(
+        "INSERT INTO recommendations (category, event) VALUES (%s, %s)",
+        (category, event_text)
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_question_by_id(question_id):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM answers WHERE question_id = %s", (question_id,))
+    cursor.execute("DELETE FROM questions WHERE id = %s", (question_id,))
+    conn.commit()
+    conn.close()
+
+
+def delete_recommendation_by_category(category):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM recommendations WHERE category = %s", (category,))
+    conn.commit()
+    conn.close()
+
+def build_category_bar_chart(data, category):
+    """Строит график по данным категории"""
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.bar(data["questions"], data["scores"])
+    ax.set_title(f"Оценки по категории: {category}")
+    ax.set_xlabel("Вопросы")
+    ax.set_ylabel("Оценка")
+    plt.xticks(rotation=45, fontsize=8, ha='right')
+    plt.tight_layout()
+    return fig

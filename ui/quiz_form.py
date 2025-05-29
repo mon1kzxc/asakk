@@ -2,14 +2,16 @@ import tkinter as tk
 from tkinter import messagebox
 from asakk.report import save_answers
 
+
 class QuizFormApp:
-    def __init__(self, root, user, questions):
+    def __init__(self, root, user, questions, on_complete=None):
         self.root = root
         self.user = user
         self.questions = questions
         self.answers = {}
         self.current_index = 0
-        self.root.title(f"Опрос — {questions[0][2] if questions else 'Без категории'}")
+        self.on_complete = on_complete  # Функция, которая вызывается после завершения
+        self.root.title(f"Опрос — {questions[0][2] if len(questions) > 0 else 'Без категории'}")
         self.root.geometry("600x400")
 
         # Вопрос
@@ -55,14 +57,16 @@ class QuizFormApp:
             self.finish_quiz()
 
     def finish_quiz(self):
-        from asakk.report import save_answers
         try:
             save_answers(self.user[0], self.answers)
             messagebox.showinfo("Готово", "Ваш опрос пройден!")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось сохранить данные: {e}")
         finally:
-            self.root.destroy()  # Закрываем окно опроса
+            # Вызываем callback, если он передан
+            if self.on_complete:
+                self.on_complete()
+            self.root.destroy()  # Закрываем окно квиза
             messagebox.showinfo("Завершение", "Спасибо за участие в опросе!")
 
     def get_current_question(self):
