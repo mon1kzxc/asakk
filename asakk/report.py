@@ -421,26 +421,39 @@ def get_categ_to_adm():
 def add_question_with_recommendation(category, question_text, event_text):
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO questions (text, category) VALUES (%s, %s) RETURNING id",
-        (question_text, category)
-    )
-    question_id = cursor.fetchone()[0]
-    cursor.execute(
-        "INSERT INTO recommendations (category, event) VALUES (%s, %s)",
-        (category, event_text)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        # Добавляем вопрос
+        cursor.execute(
+            "INSERT INTO questions (text, category) VALUES (%s, %s) RETURNING id",
+            (question_text, category)
+        )
+        question_id = cursor.fetchone()[0]
 
+        # Добавляем рекомендацию с привязкой к вопросу
+        cursor.execute(
+            "INSERT INTO recommendations (category, event, question_id) VALUES (%s, %s, %s)",
+            (category, event_text, question_id)
+        )
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Ошибка при добавлении вопроса и мероприятия: {e}")
+    finally:
+        conn.close()
 
 def delete_question_by_id(question_id):
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM answers WHERE question_id = %s", (question_id,))
-    cursor.execute("DELETE FROM questions WHERE id = %s", (question_id,))
-    conn.commit()
-    conn.close()
+    try:
+        cursor.execute("DELETE FROM answers WHERE question_id = %s", (question_id,))
+        cursor.execute("DELETE FROM questions WHERE id = %s", (question_id,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Ошибка при удалении вопроса: {e}")
+    finally:
+        conn.close()
 
 
 def delete_recommendation_by_category(category):

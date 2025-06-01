@@ -1,8 +1,9 @@
 # ui/question_editor.py
 
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import ttk, messagebox
 from asakk.report import add_question_with_recommendation, delete_question_by_id
+from asakk.quiz import get_all_questions
 
 
 class QuestionEditorApp:
@@ -14,6 +15,7 @@ class QuestionEditorApp:
 
         self.center_window()
         self.create_widgets()
+        self.load_questions()  # Загружаем список вопросов сразу
 
     def center_window(self):
         screen_width = self.root.winfo_screenwidth()
@@ -33,15 +35,37 @@ class QuestionEditorApp:
         )
         title_label.pack(pady=20)
 
+        # --- Список вопросов ---
+        list_frame = tk.Frame(self.root)
+        list_frame.pack(padx=20, pady=5, fill="both", expand=True)
+
+        tk.Label(list_frame, text="Существующие вопросы:", bg="#f8f9fa").pack(anchor="w")
+
+        self.question_listbox = tk.Listbox(list_frame, height=8, width=100, font=("Arial", 10))
+        self.question_listbox.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.question_listbox.yview)
+        scrollbar.pack(side="right", fill="y")
+
+        self.question_listbox.config(yscrollcommand=scrollbar.set)
+
+        # --- Форма добавления ---
         form_frame = tk.Frame(self.root, bg="#f8f9fa")
         form_frame.pack(pady=10)
 
-        # --- Форма добавления ---
         tk.Label(form_frame, text="Категория", bg="#f8f9fa").grid(row=0, column=0)
+
         self.category_var = tk.StringVar(value="Ценности")
         categories = ["Ценности", "Коммуникации", "Лидерство", "Инновации", "Работа в команде", "Работа и личная жизнь"]
-        category_menu = tk.OptionMenu(form_frame, self.category_var, *categories)
-        category_menu.grid(row=0, column=1)
+
+        category_combo = ttk.Combobox(
+            form_frame,
+            textvariable=self.category_var,
+            values=categories,
+            state="readonly",
+            width=30
+        )
+        category_combo.grid(row=0, column=1)
 
         tk.Label(form_frame, text="Текст вопроса", bg="#f8f9fa").grid(row=1, column=0)
         self.entry_question = tk.Entry(form_frame, width=50)
@@ -87,6 +111,17 @@ class QuestionEditorApp:
             fg="white"
         ).pack(pady=10)
 
+    def load_questions(self):
+        """Загружает список вопросов из базы данных"""
+        self.question_listbox.delete(0, tk.END)
+        questions = get_all_questions()
+
+        if not questions:
+            self.question_listbox.insert(tk.END, "Нет созданных вопросов.")
+        else:
+            for question in questions:
+                self.question_listbox.insert(tk.END, f"ID: {question[0]} | Категория: {question[2]} | Вопрос: {question[1]}")
+
     def add_question_and_event(self):
         category = self.category_var.get()
         question_text = self.entry_question.get().strip()
@@ -97,11 +132,11 @@ class QuestionEditorApp:
             return
 
         try:
-            from asakk.quiz import add_question_with_recommendation
             add_question_with_recommendation(category, question_text, event_text)
             messagebox.showinfo("Готово", "Вопрос и мероприятие добавлены!")
             self.entry_question.delete(0, tk.END)
             self.entry_event.delete(0, tk.END)
+            self.load_questions()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось добавить данные:\n{e}")
 
@@ -115,5 +150,6 @@ class QuestionEditorApp:
             delete_question_by_id(int(qid))
             messagebox.showinfo("Готово", "Вопрос удален из базы данных")
             self.entry_delete_id.delete(0, tk.END)
+            self.load_questions()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось удалить вопрос:\n{e}")

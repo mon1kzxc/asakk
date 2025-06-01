@@ -1,6 +1,7 @@
 import psycopg2
 from data.config import DB_CONFIG
 import logging
+from tkinter import messagebox
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -57,23 +58,26 @@ def save_answers(user_id, answers):
 def add_question_with_recommendation(category, question_text, event_text):
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
+    try:
+        # Добавляем вопрос
+        cursor.execute(
+            "INSERT INTO questions (text, category) VALUES (%s, %s) RETURNING id",
+            (question_text, category)
+        )
+        question_id = cursor.fetchone()[0]
 
-    # Добавляем вопрос
-    cursor.execute(
-        "INSERT INTO questions (text, category) VALUES (%s, %s) RETURNING id",
-        (question_text, category)
-    )
-    question_id = cursor.fetchone()[0]
+        # Добавляем рекомендацию с привязкой к вопросу
+        cursor.execute(
+            "INSERT INTO recommendations (category, event, question_id) VALUES (%s, %s, %s)",
+            (category, event_text, question_id)
+        )
 
-    # Добавляем связанную рекомендацию
-    cursor.execute(
-        "INSERT INTO recommendations (category, event) VALUES (%s, %s)",
-        (category, event_text)
-    )
-
-    conn.commit()
-    conn.close()
-
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Ошибка при добавлении вопроса и мероприятия: {e}")
+    finally:
+        conn.close()
 
 def add_question_to_db(text, category):
     logger.debug(f"Добавление вопроса: '{text}' → {category}")
@@ -118,3 +122,17 @@ def get_questions_by_categories(categories):
     
     conn.close()
     return questions
+
+
+def get_all_questions():
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, text, category FROM questions")
+        return cursor.fetchall()
+    except Exception as e:
+        print(f"Ошибка загрузки вопросов: {e}")
+        return []
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
