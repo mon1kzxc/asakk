@@ -39,7 +39,7 @@ class AdminApp:
     def create_widgets(self):
         title_label = tk.Label(
             self.root,
-            text="Администратор: Управление системой",
+            text="Администратор: Управление пользователями",
             font=("Arial", 14, "bold"),
             bg="#f8f9fa"
         )
@@ -89,7 +89,7 @@ class AdminApp:
         # --- Кнопка открытия редактора вопросов ---
         question_button = tk.Button(
             self.root,
-            text="Редактор вопросов и мероприятий",
+            text="Добавление вопросов и мероприятий",
             command=self.open_question_editor,
             width=30,
             bg="#007bff",
