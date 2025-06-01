@@ -97,3 +97,24 @@ def add_question_to_db(text, category):
     finally:
         if conn:
             conn.close()
+
+def get_questions_by_categories(categories):
+    """
+    Возвращает вопросы из указанных категорий.
+    categories - список названий категорий.
+    """
+    if not categories:
+        return []
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    # Используем SQL IN для выбора вопросов из нескольких категорий
+    placeholders = ', '.join(['%s'] * len(categories))
+    query = f"SELECT id, text, category FROM questions WHERE category IN ({placeholders})"
+    
+    cursor.execute(query, categories)
+    questions = cursor.fetchall()
+    
+    conn.close()
+    return questions

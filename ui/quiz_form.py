@@ -41,6 +41,10 @@ class QuizFormApp:
         return self.questions[self.current_index][1]
 
     def next_question(self):
+        # Защита от повторных нажатий после завершения
+        if getattr(self, 'finished', False):
+            return
+
         selected = self.var.get()
         if selected == -1:
             messagebox.showwarning("Ошибка", "Пожалуйста, выберите оценку.")
@@ -48,12 +52,14 @@ class QuizFormApp:
 
         q_id = self.questions[self.current_index][0]
         self.answers[q_id] = selected
+
         self.current_index += 1
 
         if self.current_index < len(self.questions):
             self.question_label.config(text=self.get_current_question())
             self.var.set(-1)
         else:
+            self.finished = True  # Отмечаем, что квиз завершён
             self.finish_quiz()
 
     def finish_quiz(self):

@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
-from asakk.quiz import get_categories, get_questions_by_category
+from asakk.quiz import get_categories, get_questions_by_categories  # Предполагается, что такая функция есть
 from ui.quiz_form import QuizFormApp
 
 
@@ -12,27 +12,33 @@ class EmployeeApp:
         self.root.geometry("500x400")
         self.root.configure(bg="#f8f9fa")
 
+        self.quiz_in_progress = False  # ✅ Флаг активности квиза
+
         self.center_window_on_parent(self.root)
 
         # Заголовок
         title_label = tk.Label(
             root,
-            text="Выберите категорию для прохождения опроса",
+            text="Выберите категории для прохождения опроса",
             font=("Arial", 14, "bold"),
             bg="#f8f9fa",
             fg="#343a40"
         )
         title_label.pack(pady=20)
 
-        # Выбор категории
-        self.category_var = tk.StringVar(value="Все категории")
+        # Выбор категорий
+        self.category_vars = {}  # Хранит переменные для чекбоксов
         category_frame = tk.Frame(root, bg="#f8f9fa")
         category_frame.pack(pady=10)
 
-        tk.Label(category_frame, text="Категория", font=("Arial", 12), bg="#f8f9fa").pack()
-        self.category_menu = tk.OptionMenu(category_frame, self.category_var, *["Все категории"] + get_categories())
-        self.category_menu.config(width=25, bg="#007bff", fg="white")
-        self.category_menu.pack(pady=5)
+        tk.Label(category_frame, text="Категории", font=("Arial", 12), bg="#f8f9fa").pack()
+
+        categories = get_categories()
+        for category in categories:
+            var = tk.BooleanVar()
+            chk = tk.Checkbutton(category_frame, text=category, variable=var, bg="#f8f9fa")
+            chk.pack(anchor='w', padx=20)
+            self.category_vars[category] = var
 
         # Кнопка начала опроса
         start_button = tk.Button(
@@ -44,26 +50,6 @@ class EmployeeApp:
             fg="white"
         )
         start_button.pack(pady=10)
-
-    def start_quiz(self):
-        category = self.category_var.get()
-        try:
-            questions = get_questions_by_category(category)
-            if not questions:
-                messagebox.showerror("Ошибка", f"Нет вопросов в категории '{category}'")
-                return
-
-            # Скрываем главное окно вместо его уничтожения
-            self.root.withdraw()
-
-            quiz_window = tk.Toplevel(self.root)
-            quiz_window.title("Прохождение опроса")
-            quiz_window.geometry("600x400")
-            self.center_window_on_parent(quiz_window)
-
-            QuizFormApp(quiz_window, self.user, questions, on_complete=self.return_to_menu).run()
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось загрузить вопросы: {e}")
 
     def center_window_on_parent(self, window):
         """Центрирует дочернее окно относительно главного"""
@@ -78,7 +64,41 @@ class EmployeeApp:
         y = parent_y + (parent_height // 2) - (window_height // 2)
         window.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
+    def start_quiz(self):
+        if self.quiz_in_progress:  # ✅ Проверяем, идёт ли уже квиз
+            messagebox.showinfo("Внимание", "Опрос уже запущен.")
+            return
+
+        selected_categories = [cat for cat, var in self.category_vars.items() if var.get()]
+        if not selected_categories:
+            messagebox.showwarning("Предупреждение", "Выберите хотя бы одну категорию.")
+            return
+
+        try:
+            questions = get_questions_by_categories(selected_categories)  # Должна поддерживать список категорий
+            if not questions:
+                messagebox.showerror("Ошибка", "Не найдено вопросов по выбранным категориям.")
+                return
+
+            self.quiz_in_progress = True  # ✅ Устанавливаем флаг
+
+            # Скрываем главное окно вместо его уничтожения
+            self.root.withdraw()
+
+            quiz_window = tk.Toplevel(self.root)
+            quiz_window.title("Прохождение опроса")
+            quiz_window.geometry("600x400")
+            self.center_window_on_parent(quiz_window)
+
+            QuizFormApp(quiz_window, self.user, questions, on_complete=self.return_to_menu).run()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить вопросы: {e}")
+
     def return_to_menu(self):
         """Вызывается после завершения опроса"""
+        self.quiz_in_progress = False  # ✅ Сбрасываем флаг
         self.root.deiconify()  # Показываем главное окно
-        self.category_var.set("Все категории")  # Сбрасываем выбор
+
+        # Сброс всех чекбоксов
+        for var in self.category_vars.values():
+            var.set(False)
