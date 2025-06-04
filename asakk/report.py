@@ -446,6 +446,12 @@ def delete_question_by_id(question_id):
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
     try:
+        # Проверяем, существует ли вопрос
+        cursor.execute("SELECT 1 FROM questions WHERE id = %s", (question_id,))
+        if cursor.fetchone() is None:
+            raise Exception(f"Вопрос с ID {question_id} не найден")
+
+        # Удаляем связанные ответы и сам вопрос
         cursor.execute("DELETE FROM answers WHERE question_id = %s", (question_id,))
         cursor.execute("DELETE FROM questions WHERE id = %s", (question_id,))
         conn.commit()
@@ -454,7 +460,6 @@ def delete_question_by_id(question_id):
         raise Exception(f"Ошибка при удалении вопроса: {e}")
     finally:
         conn.close()
-
 
 def delete_recommendation_by_category(category):
     conn = psycopg2.connect(**DB_CONFIG)
