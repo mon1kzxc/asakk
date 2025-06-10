@@ -121,43 +121,43 @@ class QuestionEditorApp:
                 self.question_listbox.insert(tk.END, f"ID: {question[0]} | Категория: {question[2]} | Вопрос: {question[1]}")
 
     def add_question_and_event(self):
-        category = self.category_combo.get()  # Используем .get() у Combobox, а не StringVar
+        category = self.category_combo.get()
         question_text = self.entry_question.get().strip()
         event_text = self.entry_event.get().strip()
 
-        print(f"[DEBUG] Добавление вопроса: Категория='{category}', Вопрос='{question_text}', Мероприятие='{event_text}'")
-
         if category == "" or category == "Выберите категорию":
-            messagebox.showwarning("Ошибка", "Пожалуйста, выберите корректную категорию.")
+            messagebox.showwarning("Ошибка", "Пожалуйста, выберите корректную категорию.", parent=self.root)
             return
 
-        # Проверяем заполненность текстовых полей
         if not question_text or not event_text:
-            messagebox.showwarning("Ошибка", "Все поля должны быть заполнены.")
+            messagebox.showwarning("Ошибка", "Все поля должны быть заполнены.", parent=self.root)
             return
 
-        # Пробуем добавить данные
         try:
             add_question_with_recommendation(category, question_text, event_text)
-            messagebox.showinfo("Готово", "Вопрос и мероприятие успешно добавлены!")
+            messagebox.showinfo("Готово", "Вопрос и мероприятие успешно добавлены!", parent=self.root)
             self.entry_question.delete(0, tk.END)
             self.entry_event.delete(0, tk.END)
-            self.load_questions()  # Обновляем список
+            self.load_questions()
+            self.root.lift()  # Поднимаем окно редактора поверх других
+            self.root.focus_force()  # Фокусируем его
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось добавить данные:\n{e}")
+            messagebox.showerror("Ошибка", f"Не удалось добавить данные:\n{e}", parent=self.root)
 
     def delete_question(self):
         qid = self.entry_delete_id.get().strip()
         if not qid.isdigit():
-            messagebox.showwarning("Ошибка", "Введите корректный ID вопроса")
+            messagebox.showwarning("Ошибка", "Введите корректный ID вопроса", parent=self.root)
             return
 
         qid_int = int(qid)
 
         try:
             delete_question_by_id(qid_int)
-            messagebox.showinfo("Готово", f"Вопрос с ID {qid_int} удален.")
+            messagebox.showinfo("Готово", f"Вопрос с ID {qid_int} удален.", parent=self.root)
             self.entry_delete_id.delete(0, tk.END)
             self.load_questions()
+            self.root.lift()
+            self.root.focus_force()
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось удалить вопрос:\n{e}")
+            messagebox.showerror("Ошибка", f"Не удалось удалить вопрос:\n{e}", parent=self.root)
